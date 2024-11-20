@@ -26,6 +26,7 @@ var (
 	ContainerSourceCodePath     = "/root/src"
 	ContainerCargoRegistryCache = "/root/cargo/registry"
 	ContainerCargoGitCache      = "/root/cargo/git"
+	ContainerCargoConfigToml    = "/root/cargo/config.toml"
 	ContainerBinPath            = "/root/bin"
 	LocalMutantPath             = filepath.Join(configs.BinPath, "malefic-mutant")
 	command                     = "generate"
@@ -36,11 +37,13 @@ var (
 	binPath, _               = filepath.Abs(configs.BinPath)
 	registryPath, _          = filepath.Abs(filepath.Join(configs.CargoCachePath, "registry"))
 	gitPath, _               = filepath.Abs(filepath.Join(configs.CargoCachePath, "git"))
+	configPath, _            = filepath.Abs(filepath.Join(configs.CargoCachePath, "config.toml"))
 	SourceCodeVolume         = fmt.Sprintf("%s:%s", filepath.ToSlash(sourcePath), ContainerSourceCodePath)
 	CargoRegistryCacheVolume = fmt.Sprintf("%s:%s", filepath.ToSlash(registryPath), ContainerCargoRegistryCache)
 	CargoGitCacheVolume      = fmt.Sprintf("%s:%s", filepath.ToSlash(gitPath), ContainerCargoGitCache)
+	CargoConfigTomlVolume    = fmt.Sprintf("%s:%s", filepath.ToSlash(configPath), ContainerCargoConfigToml)
 	BinPathVolume            = fmt.Sprintf("%s:%s", filepath.ToSlash(binPath), ContainerBinPath)
-	Volumes                  = []string{SourceCodeVolume, CargoRegistryCacheVolume, CargoGitCacheVolume, BinPathVolume}
+	Volumes                  = []string{SourceCodeVolume, CargoRegistryCacheVolume, CargoGitCacheVolume, BinPathVolume, CargoConfigTomlVolume}
 )
 
 var dockerClient *client.Client
