@@ -131,13 +131,22 @@ check_install_docker(){
         log_task_status completed "Docker 已安装，跳过安装..."
     fi
     
-    echo "是否需要配置 Docker 镜像加速源？[y/n]"
-    read -r user_choice
-    if [[ "$user_choice" == "y" || "$user_choice" == "Y" || "$user_choice" == "yes" || "$user_choice" == "YES" ]]; then
-        change_docker_daemon
-    else
-        log_task_status in_progress "操作已取消，Docker 镜像加速源保持不变。"
-    fi
+    while true; do
+        read -r -p "是否需要配置 Docker 镜像加速源？[y/n] " user_choice
+        case "$user_choice" in
+            [yY] | [yY][eE][sS])
+                change_docker_daemon
+                break
+                ;;
+            [nN] | [nN][oO])
+                log_task_status in_progress "操作已取消，Docker 镜像加速源保持不变。"
+                break
+                ;;
+            *)
+                echo "无效输入，请输入 y 或 n。"
+                ;;
+        esac
+    done
     
     log_task_status completed "Docker 安装完成，当前 Docker 版本为：$(docker --version)"
 }
@@ -188,9 +197,9 @@ setup_environment(){
             IoM_ROOT_DIR=${input_dir:-$DEFAULT_DIR}
         else
             IoM_ROOT_DIR=$DEFAULT_DIR
-            log_task_status "completed" "No interactive shell detected. Using default base directory: $IoM_ROOT_DIR"
+            log_task_status "completed" "No interactive shell detected. Using default base directory: ${IoM_ROOT_DIR}"
         fi
-        log_task_status completed "Using base directory: $IoM_ROOT_DIR"
+        log_task_status completed "Using base directory: ${IoM_ROOT_DIR}"
     }
     set_base_dir
     set_server_ip
@@ -233,7 +242,7 @@ install_malice_network() {
 }
 # install malefic's artifacts sourcecode 、sgn 、malefic_mutant
 install_malefic(){
-    local MALEFIC_ROOT_DIR="$IoM_ROOT_DIR/malefic"
+    local MALEFIC_ROOT_DIR="${IoM_ROOT_DIR}/malefic"
     
     install_source_code(){
         local MALEFIC_REPO_URL="https://github.com/chainreactors/malefic"
@@ -288,6 +297,26 @@ install_malefic(){
         log_task_status "completed" "Sgn downloaded successfully!"
     }
 
+    write_cargo_config(){
+      local md="${MALEFIC_ROOT_DIR}/build/cache"
+      mkdir -p "$md"
+      pushd "${md}"
+      local config_content="[source.crates-io]
+replace-with = 'rsproxy-sparse'
+[source.rsproxy]
+registry = \"https://rsproxy.cn/crates.io-index\"
+[source.rsproxy-sparse]
+registry = \"sparse+https://rsproxy.cn/index/\"
+[registries.rsproxy]
+index = \"https://rsproxy.cn/crates.io-index\"
+[net]
+git-fetch-with-cli = true
+retry = 4
+"
+      echo "$config_content" > config.toml
+      popd
+    }
+
     add_to_path() {
         local new_path="${MALEFIC_ROOT_DIR}/build/bin"
         
@@ -315,6 +344,7 @@ install_malefic(){
     
     install_source_code # before install resources
     install_resources
+    write_cargo_config
     install_malefic_mutant
     install_sgn
     add_to_path
@@ -332,7 +362,7 @@ After=network.target
 StartLimitIntervalSec=0
 
 [Service]
-WorkingDirectory=$IoM_ROOT_DIR/malice-network
+WorkingDirectory=${IoM_ROOT_DIR}/malice-network
 Restart=always
 RestartSec=5
 User=root

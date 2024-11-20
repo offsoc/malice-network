@@ -205,6 +205,17 @@ install_malefic(){
         popd
         log_task_status "completed" "Sgn downloaded successfully!"
     }
+    write_cargo_config(){
+        local md="${MALEFIC_ROOT_DIR}/build/cache"
+        mkdir -p "$md"
+        pushd "${md}"
+        local config_content="[net]
+git-fetch-with-cli = true
+retry = 4
+"
+        echo "$config_content" > config.toml
+        popd
+    }
 
     add_to_path() {
         local new_path="${MALEFIC_ROOT_DIR}/build/bin"
@@ -233,6 +244,7 @@ install_malefic(){
     
     install_source_code # before install resources
     install_resources
+    write_cargo_config
     install_malefic_mutant
     install_sgn
     add_to_path
