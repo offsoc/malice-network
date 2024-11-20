@@ -1,20 +1,25 @@
 package command
 
 import (
+	"github.com/chainreactors/malice-network/client/assets"
 	"github.com/chainreactors/malice-network/client/command/alias"
 	"github.com/chainreactors/malice-network/client/command/armory"
+	"github.com/chainreactors/malice-network/client/command/build"
 	"github.com/chainreactors/malice-network/client/command/extension"
 	"github.com/chainreactors/malice-network/client/command/generic"
+	"github.com/chainreactors/malice-network/client/command/help"
 	"github.com/chainreactors/malice-network/client/command/listener"
 	"github.com/chainreactors/malice-network/client/command/mal"
 	"github.com/chainreactors/malice-network/client/command/sessions"
 	"github.com/chainreactors/malice-network/client/core"
 	"github.com/chainreactors/malice-network/client/repl"
 	"github.com/chainreactors/malice-network/helper/consts"
-	"github.com/chainreactors/malice-network/helper/utils/file"
+	"github.com/chainreactors/malice-network/helper/utils/fileutils"
+	"github.com/chainreactors/malice-network/helper/utils/mtls"
 	"github.com/reeflective/console"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
+	"path/filepath"
 )
 
 func bindCommonCommands(bind bindFunc) {
@@ -31,6 +36,10 @@ func bindCommonCommands(bind bindFunc) {
 
 	bind(consts.ListenerGroup,
 		listener.Commands,
+	)
+
+	bind(consts.GeneratorGroup,
+		build.Commands,
 	)
 }
 
@@ -50,11 +59,18 @@ func ConsoleRunnerCmd(con *repl.Console, run bool) (pre, post func(cmd *cobra.Co
 	pre = func(_ *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			filename := args[0]
-			if !file.Exist(filename) {
-				con.Log.Warnf("not found file, maybe %s already move to config path", filename)
-				err := generic.LoginCmd(nil, con)
-				if err != nil {
-					return nil
+			if !fileutils.Exist(filename) {
+				if cfg, err := mtls.ReadConfig(filepath.Join(assets.GetConfigDir(), filepath.Base(filename))); err == nil {
+					err = repl.Login(con, cfg)
+					if err != nil {
+						return nil
+					}
+				} else {
+					con.Log.Warnf("not found file, maybe %s already move to config path\n", filename)
+					err := generic.LoginCmd(nil, con)
+					if err != nil {
+						return nil
+					}
 				}
 			} else {
 				err := repl.NewConfigLogin(con, filename)
@@ -63,7 +79,6 @@ func ConsoleRunnerCmd(con *repl.Console, run bool) (pre, post func(cmd *cobra.Co
 					return nil
 				}
 			}
-
 		} else {
 			err := generic.LoginCmd(nil, con)
 			if err != nil {
@@ -102,8 +117,17 @@ func BindClientsCommands(con *repl.Console) console.Commands {
 
 		client.InitDefaultHelpCmd()
 		client.InitDefaultHelpFlag()
+		client.SetUsageFunc(help.UsageFunc)
+		client.SetHelpFunc(help.HelpFunc)
 		client.SetHelpCommandGroupID(consts.GenericGroup)
+
+		RegisterClientFunc(con)
+		RegisterImplantFunc(con)
 		return client
 	}
 	return clientCommands
+}
+
+func RegisterClientFunc(con *repl.Console) {
+	generic.Register(con)
 }

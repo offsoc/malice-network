@@ -10,10 +10,10 @@ import (
 	"github.com/chainreactors/malice-network/client/core/intermediate"
 	"github.com/chainreactors/malice-network/client/repl"
 	"github.com/chainreactors/malice-network/helper/consts"
-	"github.com/chainreactors/malice-network/helper/utils/file"
-	"github.com/chainreactors/malice-network/proto/client/clientpb"
-	"github.com/chainreactors/malice-network/proto/implant/implantpb"
-	"github.com/chainreactors/malice-network/proto/services/clientrpc"
+	"github.com/chainreactors/malice-network/helper/proto/client/clientpb"
+	"github.com/chainreactors/malice-network/helper/proto/implant/implantpb"
+	"github.com/chainreactors/malice-network/helper/proto/services/clientrpc"
+	"github.com/chainreactors/malice-network/helper/utils/fileutils"
 	"github.com/kballard/go-shellquote"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -116,7 +116,7 @@ func AliasesLoadCmd(cmd *cobra.Command, con *repl.Console) {
 	}
 	err = RegisterAlias(alias, con.ImplantMenu(), con)
 	if err != nil {
-		con.Log.Errorf(err.Error())
+		con.Log.Errorf(err.Error() + "\n")
 		return
 	}
 }
@@ -128,7 +128,7 @@ func LoadAlias(manifestPath string, con *repl.Console) (*AliasManifest, error) {
 	if !strings.HasPrefix(manifestPath, assets.GetAliasesDir()) {
 		manifestPath = path.Join(assets.GetAliasesDir(), manifestPath)
 	}
-	if !file.Exist(manifestPath) {
+	if !fileutils.Exist(manifestPath) {
 		return nil, fmt.Errorf("alias %s maybe not installed", manifestPath)
 	}
 	// parse it
@@ -147,7 +147,7 @@ func LoadAlias(manifestPath string, con *repl.Console) (*AliasManifest, error) {
 	// for each alias command, add a new app command
 	//implantMenu := con.App.Menu(consts.ImplantGroup)
 	// do not add if the command already exists
-	//if console.CmdExists(aliasManifest.CommandName, implantMenu.Command) {
+	//if console.CmdExist(aliasManifest.CommandName, implantMenu.Command) {
 	//	return nil, fmt.Errorf("'%s' command already exists", aliasManifest.CommandName)
 	//}
 
@@ -189,6 +189,12 @@ func RegisterAlias(aliasManifest *AliasManifest, cmd *cobra.Command, con *repl.C
 			return ExecuteAlias(rpc, sess, aliasManifest.CommandName, args, amsi, etw, sac)
 		}, common.ParseAssembly),
 	}
+	profile := assets.GetProfile()
+	profile.AddAlias(aliasManifest.CommandName)
+	err := assets.SaveProfile(profile)
+	if err != nil {
+		return err
+	}
 	cmd.AddCommand(addAliasCmd)
 
 	return nil
@@ -221,7 +227,7 @@ func ParseAliasManifest(data []byte) (*AliasManifest, error) {
 			return nil, fmt.Errorf("missing command.files.arch in alias manifest")
 		}
 		aliasFile.Arch = strings.ToLower(aliasFile.Arch)
-		aliasFile.Path = file.ResolvePath(aliasFile.Path)
+		aliasFile.Path = fileutils.ResolvePath(aliasFile.Path)
 		if aliasFile.Path == "" || aliasFile.Path == "/" {
 			return nil, fmt.Errorf("missing command.files.path in alias manifest")
 		}
@@ -264,7 +270,7 @@ func runAliasCommand(cmd *cobra.Command, con *repl.Console) {
 		sac, _ := common.ParseSacrificeFlags(cmd)
 		task, err := ExecuteAlias(con.Rpc, session, cmd.Name(), extArgs, amsi, etw, sac)
 		if err != nil {
-			con.Log.Errorf("Execute error: %v", err)
+			con.Log.Errorf("Execute error: %v\n", err)
 			return
 		}
 		session.Console(task, fmt.Sprintf("%s alias: %s", aliasModule(aliasManifest), cmd.Name()))
@@ -295,17 +301,16 @@ func ExecuteAlias(rpc clientrpc.MaliceRPCClient, sess *core.Session, aliasName s
 		if err != nil {
 			return nil, err
 		}
-		task, err = rpc.ExecuteAssembly(sess.Context(), &implantpb.ExecuteClr{
-			EtwBypass:  etw,
-			AmsiBypass: amsi,
-			ExecuteBinary: &implantpb.ExecuteBinary{
-				Name:   loadedAlias.Command.Name(),
-				Bin:    binData,
-				Type:   consts.ModuleExecuteAssembly,
-				Args:   params,
-				Output: true,
-			},
-		})
+		binary := &implantpb.ExecuteBinary{
+			Name:   loadedAlias.Command.Name(),
+			Bin:    binData,
+			Type:   consts.ModuleExecuteAssembly,
+			Args:   params,
+			Output: true,
+		}
+
+		common.UpdateClrBinary(binary, etw, amsi)
+		task, err = rpc.ExecuteAssembly(sess.Context(), binary)
 	} else {
 		task, err = rpc.ExecuteDLL(sess.Context(), &implantpb.ExecuteBinary{
 			Name:       loadedAlias.Command.Name(),
@@ -328,7 +333,7 @@ func makeAliasPlatformFilters(alias *AliasManifest) map[string]string {
 	var arch []string
 	for _, file := range alias.Files {
 		all["os"] = file.OS
-		arch = append(arch, file.Arch)
+		arch = append(arch, consts.FormatArch(file.Arch))
 	}
 	all["arch"] = strings.Join(arch, ",")
 

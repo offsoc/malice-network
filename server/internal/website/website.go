@@ -1,7 +1,7 @@
 package website
 
 import (
-	"github.com/chainreactors/malice-network/proto/listener/lispb"
+	"github.com/chainreactors/malice-network/helper/proto/client/clientpb"
 	"github.com/chainreactors/malice-network/server/internal/configs"
 	"github.com/chainreactors/malice-network/server/internal/db"
 	"net/url"
@@ -21,7 +21,7 @@ func getWebContentDir() (string, error) {
 }
 
 // GetContent
-func GetContent(name string, path string) (*lispb.WebContent, error) {
+func GetContent(name string, path string) (*clientpb.WebContent, error) {
 	webContentDir, err := getWebContentDir()
 	if err != nil {
 		return nil, err
@@ -41,7 +41,7 @@ func GetContent(name string, path string) (*lispb.WebContent, error) {
 }
 
 // AddContent
-func AddContent(name string, pbWebContent *lispb.WebContent) (string, error) {
+func AddContent(name string, pbWebContent *clientpb.WebContent) (string, error) {
 	webContentDir, err := getWebContentDir()
 	if err != nil {
 		return "", err
@@ -53,7 +53,7 @@ func AddContent(name string, pbWebContent *lispb.WebContent) (string, error) {
 	}
 
 	//webContentPath := filepath.Join(webContentDir, webContent.ID)
-	return webContent.ID, nil
+	return webContent.Id, nil
 }
 
 // RemoveContent
@@ -73,12 +73,12 @@ func RemoveContent(name string, path string) error {
 		return err
 	}
 
-	err = os.Remove(filepath.Join(webContentDir, content.ID))
+	err = os.Remove(filepath.Join(webContentDir, content.Id))
 	if err != nil {
 		return err
 	}
 
-	return db.RemoveContent(content.ID)
+	return db.RemoveContent(content.Id)
 }
 
 // Name
@@ -95,13 +95,13 @@ func Names() ([]string, error) {
 
 	var names []string
 	for _, website := range websites {
-		names = append(names, website.Name)
+		names = append(names, website.ID)
 	}
 	return names, nil
 }
 
-// MapConten
-func MapContent(name string, eager bool) (*lispb.Website, error) {
+// MapContent
+func MapContent(name string, eager bool) (*clientpb.Website, error) {
 	webContentDir, err := getWebContentDir()
 	if err != nil {
 		return nil, err
@@ -113,8 +113,8 @@ func MapContent(name string, eager bool) (*lispb.Website, error) {
 	}
 
 	if eager {
-		eagerContents := map[string]*lispb.WebContent{}
-		content, err := db.WebContentByIDAndPath(website.ID, website.Name, webContentDir, true)
+		eagerContents := map[string]*clientpb.WebContent{}
+		content, err := db.WebContentByIDAndPath(website.ID, website.Root, webContentDir, true)
 		if err != nil {
 			return nil, err
 		}
@@ -125,8 +125,34 @@ func MapContent(name string, eager bool) (*lispb.Website, error) {
 	return website, nil
 }
 
+func MapContents(name string) (*clientpb.Website, error) {
+	webContentDir, err := getWebContentDir()
+	if err != nil {
+		return nil, err
+	}
+
+	websites, err := db.WebsitesAllByname(name, webContentDir)
+	if err != nil {
+		return nil, err
+	}
+	var webResult = &clientpb.Website{
+		Contents: make(map[string]*clientpb.WebContent),
+	}
+	for _, website := range websites {
+		//eagerContents := map[string]*clientpb.WebContent{}
+		content, err := db.WebContentByIDAndPath(website.ID, website.Root, webContentDir, true)
+		if err != nil {
+			return nil, err
+		}
+		//eagerContents[content.Path] = content
+		//website.Contents = eagerContents
+		webResult.Contents[content.Path] = content
+	}
+	return webResult, nil
+}
+
 // AddWebsite
-func AddWebsite(name string) (*lispb.Website, error) {
+func AddWebsite(name string) (*clientpb.Website, error) {
 	webContentDir, err := getWebContentDir()
 	if err != nil {
 		return nil, err
@@ -135,7 +161,7 @@ func AddWebsite(name string) (*lispb.Website, error) {
 }
 
 // WebsiteByName
-func WebsiteByName(name string) (*lispb.Website, error) {
+func WebsiteByName(name string) (*clientpb.Website, error) {
 	webContentDir, err := getWebContentDir()
 	if err != nil {
 		return nil, err

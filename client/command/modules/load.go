@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"github.com/chainreactors/malice-network/client/core"
 	"github.com/chainreactors/malice-network/client/repl"
-	"github.com/chainreactors/malice-network/proto/client/clientpb"
-	"github.com/chainreactors/malice-network/proto/implant/implantpb"
-	"github.com/chainreactors/malice-network/proto/services/clientrpc"
+	"github.com/chainreactors/malice-network/helper/proto/client/clientpb"
+	"github.com/chainreactors/malice-network/helper/proto/implant/implantpb"
+	"github.com/chainreactors/malice-network/helper/proto/services/clientrpc"
 	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
 )
 
-func LoadModuleCmd(cmd *cobra.Command, con *repl.Console) {
+func LoadModuleCmd(cmd *cobra.Command, con *repl.Console) error {
 	path := cmd.Flags().Arg(0)
 	bundle, _ := cmd.Flags().GetString("bundle")
 	if bundle == "" {
@@ -21,11 +21,11 @@ func LoadModuleCmd(cmd *cobra.Command, con *repl.Console) {
 	session := con.GetInteractive()
 	task, err := LoadModule(con.Rpc, session, bundle, path)
 	if err != nil {
-		con.Log.Errorf("LoadModule error: %v", err)
-		return
+		return err
 	}
 
 	session.Console(task, fmt.Sprintf("load %s %s", bundle, path))
+	return nil
 }
 
 func LoadModule(rpc clientrpc.MaliceRPCClient, session *core.Session, bundle string, path string) (*clientpb.Task, error) {

@@ -5,9 +5,9 @@ import (
 	"github.com/chainreactors/malice-network/client/core"
 	"github.com/chainreactors/malice-network/client/repl"
 	"github.com/chainreactors/malice-network/helper/consts"
-	"github.com/chainreactors/malice-network/proto/client/clientpb"
-	"github.com/chainreactors/malice-network/proto/implant/implantpb"
-	"github.com/chainreactors/malice-network/proto/services/clientrpc"
+	"github.com/chainreactors/malice-network/helper/proto/client/clientpb"
+	"github.com/chainreactors/malice-network/helper/proto/implant/implantpb"
+	"github.com/chainreactors/malice-network/helper/proto/services/clientrpc"
 	"github.com/spf13/cobra"
 	"slices"
 )
@@ -24,7 +24,7 @@ func ExecuteAddonCmd(cmd *cobra.Command, con *repl.Console) {
 	}
 
 	if !session.HasAddon(cmd.Name()) {
-		con.Log.Errorf("addon %s not found in %s", cmd.Name(), session.SessionId)
+		con.Log.Errorf("addon %s not found in %s\n", cmd.Name(), session.SessionId)
 		return
 	}
 
@@ -36,7 +36,7 @@ func ExecuteAddonCmd(cmd *cobra.Command, con *repl.Console) {
 
 	_, err := ExecuteAddon(con.Rpc, session, cmd.Name(), args, !quiet, timeout, arch, process, sac)
 	if err != nil {
-		con.Log.Errorf("%s", err)
+		con.Log.Errorf("%s\n", err)
 		return
 	}
 }
@@ -54,7 +54,7 @@ func ExecuteAddon(rpc clientrpc.MaliceRPCClient, sess *core.Session, name string
 			Sacrifice:   sac,
 			Output:      output,
 			Timeout:     timeout,
-			Arch:        consts.ArchMap[arch],
+			Arch:        consts.MapArch(arch),
 			ProcessName: process,
 		},
 	})

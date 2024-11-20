@@ -12,13 +12,14 @@ var (
 )
 
 type Settings struct {
-	TableStyle        string `json:"tables"`
-	AutoAdult         bool   `json:"autoadult"`
-	BeaconAutoResults bool   `json:"beacon_autoresults"`
-	SmallTermWidth    int    `json:"small_term_width"`
-	AlwaysOverflow    bool   `json:"always_overflow"`
-	VimMode           bool   `json:"vim_mode"`
-	DefaultTimeout    int
+	TableStyle        string `yaml:"tables" config:"tables"`
+	AutoAdult         bool   `yaml:"autoadult" config:"autoadult"`
+	BeaconAutoResults bool   `yaml:"beacon_autoresults" config:"beacon_autoresults"`
+	SmallTermWidth    int    `yaml:"small_term_width" config:"small_term_width"`
+	AlwaysOverflow    bool   `yaml:"always_overflow" config:"always_overflow"`
+	VimMode           bool   `yaml:"vim_mode" config:"vim_mode"`
+	DefaultTimeout    int    `yaml:"default_timeout" config:"default_timeout" default:""`
+	MaxServerLogSize  int    `yaml:"max_server_log_size" config:"max_server_log_size" default:"10"`
 }
 
 func LoadSettings() (*Settings, error) {

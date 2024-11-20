@@ -2,21 +2,22 @@ package assets
 
 import (
 	_ "embed"
+	"fmt"
 	"github.com/chainreactors/logs"
-	"github.com/chainreactors/malice-network/helper/utils/file"
+	"github.com/chainreactors/malice-network/helper/utils/fileutils"
 	"os"
 	"os/user"
 	"path/filepath"
-	"runtime"
 	"strings"
+	"time"
 )
 
-//go:embed _inputrc
-var inputrc string
-
 var (
-	MaliceDirName = ".config/malice"
-	ConfigDirName = "configs"
+	MaliceDirName    = ".config/malice"
+	ConfigDirName    = "configs"
+	ResourcesDirName = "resources"
+	TempDirName      = "temp"
+	LogDirName       = "log"
 )
 
 func GetConfigDir() string {
@@ -43,6 +44,61 @@ func GetRootAppDir() string {
 	return dir
 }
 
+func GetResourceDir() string {
+	rootDir, _ := filepath.Abs(GetRootAppDir())
+	dir := filepath.Join(rootDir, ResourcesDirName)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err = os.MkdirAll(dir, 0700)
+		if err != nil {
+			logs.Log.Errorf(err.Error())
+		}
+	}
+	return dir
+}
+
+func GetTempDir() string {
+	rootDir, _ := filepath.Abs(GetRootAppDir())
+	dir := filepath.Join(rootDir, TempDirName)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err = os.MkdirAll(dir, 0700)
+		if err != nil {
+			logs.Log.Errorf(err.Error())
+		}
+	}
+	return dir
+}
+
+func GenerateTempFile(sessionId, filename string) (*os.File, error) {
+	sessionDir := filepath.Join(GetTempDir(), sessionId)
+	if !fileutils.Exist(sessionDir) {
+		if err := os.MkdirAll(sessionDir, os.ModePerm); err != nil {
+			logs.Log.Errorf("failed to create session directory: %s", err.Error())
+		}
+	}
+	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+	ext := filepath.Ext(filename)
+	fullPath := filepath.Join(sessionDir, filename)
+	timestampMillis := time.Now().UnixNano() / int64(time.Millisecond)
+	seconds := timestampMillis / 1000
+	nanoseconds := (timestampMillis % 1000) * int64(time.Millisecond)
+	t := time.Unix(seconds, nanoseconds)
+	fullPath = filepath.Join(sessionDir, fmt.Sprintf("%s_%s%s", baseName, t.Format("2006-01-02_15-04-05"), ext))
+	return os.Create(fullPath)
+}
+
+func GetLogDir() string {
+	rootDir, _ := filepath.Abs(GetRootAppDir())
+	dir := filepath.Join(rootDir, LogDirName)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err = os.MkdirAll(dir, 0700)
+		if err != nil {
+			logs.Log.Errorf(err.Error())
+		}
+	}
+	return dir
+
+}
+
 func GetConfigs() ([]string, error) {
 	var files []string
 
@@ -67,26 +123,13 @@ func GetConfigs() ([]string, error) {
 func MvConfig(oldPath string) error {
 	fileName := filepath.Base(oldPath)
 	newPath := filepath.Join(GetConfigDir(), fileName)
-	err := file.CopyFile(oldPath, newPath)
+	err := fileutils.CopyFile(oldPath, newPath)
 	if err != nil {
 		return err
 	}
-	err = file.RemoveFile(oldPath)
+	err = fileutils.RemoveFile(oldPath)
 	if err != nil {
 		return err
 	}
 	return nil
-}
-
-func SetInputrc() {
-	home, _ := os.UserHomeDir()
-	inputrcPath := filepath.Join(home, "_inputrc")
-	if runtime.GOOS == "windows" {
-		if _, err := os.Stat(inputrcPath); os.IsNotExist(err) {
-			err = os.WriteFile(inputrcPath, []byte(inputrc), 0644)
-			if err != nil {
-				logs.Log.Errorf(err.Error())
-			}
-		}
-	}
 }

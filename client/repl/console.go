@@ -17,11 +17,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 var (
 	ErrNotFoundSession = errors.New("session not found")
-	Prompt             = "IOM"
+	Prompt             = "IoM"
 )
 
 // BindCmds - Bind extra commands to the app object
@@ -38,8 +39,16 @@ func NewConsole() (*Console, error) {
 		//Settings:     settings,
 		Log:     core.Log,
 		Plugins: NewPlugins(),
+		CMDs:    make(map[string]*cobra.Command),
 	}
-
+	go func() {
+		for {
+			if con.ServerStatus != nil && !con.ServerStatus.EventStatus {
+				con.EventHandler()
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
 	con.NewConsole()
 	return con, nil
 }
@@ -48,9 +57,10 @@ type Console struct {
 	//*core.ActiveTarget
 	*core.ServerStatus
 	*Plugins
-	Log      *core.Logger
-	App      *console.Console
-	Settings *assets.Settings
+	Log     *core.Logger
+	App     *console.Console
+	Profile *assets.Profile
+	CMDs    map[string]*cobra.Command
 }
 
 func (c *Console) NewConsole() {
@@ -69,11 +79,10 @@ func (c *Console) NewConsole() {
 	implant.Prompt().Primary = c.GetPrompt
 	implant.AddInterrupt(io.EOF, exitImplantMenu) // Ctrl-D
 	implant.AddHistorySourceFile("history", filepath.Join(assets.GetRootAppDir(), "implant_history"))
-
 }
 
 func (c *Console) Start(bindCmds ...BindCmds) error {
-	intermediate.Register(c.Rpc)
+	intermediate.RegisterBuiltin(c.Rpc)
 	//c.App.Menu(consts.ClientMenu).SetCommands(bindCmds[0](c))
 	//c.App.Menu(consts.ImplantMenu).SetCommands(bindCmds[1](c))
 	c.App.Menu(consts.ClientMenu).Command = bindCmds[0](c)()
@@ -125,14 +134,20 @@ func (c *Console) ImplantMenu() *cobra.Command {
 func (c *Console) SwitchImplant(sess *core.Session) {
 	c.ActiveTarget.Set(sess)
 	c.App.SwitchMenu(consts.ImplantMenu)
-
+	sess.GetHistory()
 	var count int
-	for _, cmd := range c.ImplantMenu().Commands() {
+	for _, cmd := range c.CMDs {
+		if cmd.Annotations["menu"] != consts.ImplantMenu {
+			continue
+		}
 		cmd.Hidden = false
 		if o, ok := cmd.Annotations["os"]; ok && !strings.Contains(o, sess.Os.Name) {
 			cmd.Hidden = true
 		}
 		if arch, ok := cmd.Annotations["arch"]; ok && !strings.Contains(arch, sess.Os.Arch) {
+			cmd.Hidden = true
+		}
+		if implantType, ok := cmd.Annotations["implant"]; ok && sess.Type != implantType {
 			cmd.Hidden = true
 		}
 		if depend, ok := cmd.Annotations["depend"]; ok {
@@ -142,32 +157,67 @@ func (c *Console) SwitchImplant(sess *core.Session) {
 				}
 			}
 		}
-		if cmd.Annotations["menu"] == consts.ImplantMenu && cmd.Hidden == false {
+		if cmd.Hidden == false {
 			count++
 		}
 	}
-	c.Log.Importantf("os: %s, arch: %s, process: %d %s, pipeline: %s", sess.Os.Name, sess.Os.Arch, sess.Process.Ppid, sess.Process.Name, sess.ListenerId)
-	c.Log.Importantf("%d modules, %d available cmds, %d addons", len(sess.Modules), count, len(sess.Addons.Addons))
+	c.Log.Importantf("os: %s, arch: %s, process: %d %s, pipeline: %s", sess.Os.Name, sess.Os.Arch, sess.Process.Ppid, sess.Process.Name, sess.PipelineId)
+	c.Log.Importantf("%d modules, %d available cmds, %d addons", len(sess.Modules), count, len(sess.Addons))
 	c.Log.Infof("Active session %s (%s), group: %s\n", sess.Note, sess.SessionId, sess.GroupName)
 }
 
 func (c *Console) RegisterImplantFunc(name string, fn interface{},
-	bname string, bfn interface{},
-	pluginCallback ImplantPluginCallback, implantCallback intermediate.ImplantCallback) {
+	bname string, bfn interface{}, // return to plugin
+	internalCallback ImplantFuncCallback, callback intermediate.ImplantCallback) {
 
-	if implantCallback == nil {
-		implantCallback = WrapImplantCallback(pluginCallback)
+	if callback == nil {
+		callback = WrapClientCallback(internalCallback)
 	}
 
 	if fn != nil {
-		intermediate.RegisterInternalFunc(name, WrapImplantFunc(c, fn, pluginCallback), implantCallback)
+		intermediate.RegisterInternalFunc(intermediate.BuiltinPackage, name, WrapImplantFunc(c, fn, internalCallback), callback)
 	}
 
 	if bfn != nil {
-		intermediate.RegisterInternalFunc(bname, WrapImplantFunc(c, bfn, pluginCallback), implantCallback)
+		intermediate.RegisterInternalFunc(intermediate.BeaconPackage, bname, WrapImplantFunc(c, bfn, internalCallback), callback)
 	}
 }
 
-func (c *Console) RegisterServerFunc(name string, fn interface{}) error {
-	return intermediate.RegisterInternalFunc(name, WrapServerFunc(c, fn), nil)
+func (c *Console) RegisterBuiltinFunc(pkg, name string, fn interface{}, callback ImplantFuncCallback) error {
+	var implantCallback intermediate.ImplantCallback
+	if callback == nil {
+		implantCallback = WrapClientCallback(callback)
+	}
+
+	return intermediate.RegisterInternalFunc(pkg, name, WrapImplantFunc(c, fn, callback), implantCallback)
+}
+
+func (c *Console) RegisterServerFunc(name string, fn interface{}, helper *intermediate.Helper) error {
+	err := intermediate.RegisterInternalFunc(intermediate.BuiltinPackage, name, WrapServerFunc(c, fn), nil)
+	if helper != nil {
+		return intermediate.AddHelper(name, helper)
+	}
+	return err
+}
+
+func (c *Console) AddInternalFuncHelper(cmdName string, funcName string, example string, input, output []string) error {
+	cmd, ok := c.CMDs[cmdName]
+	if ok {
+		return intermediate.AddHelper(funcName, &intermediate.Helper{
+			CMDName: cmdName,
+			Group:   cmd.GroupID,
+			Short:   cmd.Short,
+			Long:    cmd.Long,
+			Input:   input,
+			Output:  output,
+			Example: example,
+		})
+	} else {
+		return intermediate.AddHelper(funcName, &intermediate.Helper{
+			CMDName: cmdName,
+			Input:   input,
+			Output:  output,
+			Example: example,
+		})
+	}
 }

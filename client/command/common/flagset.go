@@ -1,8 +1,9 @@
 package common
 
 import (
-	"github.com/chainreactors/malice-network/client/core/intermediate/builtin"
-	"github.com/chainreactors/malice-network/proto/implant/implantpb"
+	"github.com/chainreactors/malice-network/helper/cryptography"
+	"github.com/chainreactors/malice-network/helper/proto/client/clientpb"
+	"github.com/chainreactors/malice-network/helper/proto/implant/implantpb"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -11,7 +12,7 @@ func ExecuteFlagSet(f *pflag.FlagSet) {
 	f.StringP("process", "n", `C:\\Windows\\System32\\notepad.exe`, "custom process path")
 	f.BoolP("quit", "q", false, "disable output")
 	f.Uint32P("timeout", "t", 60, "timeout, in seconds")
-	f.String("arch", "", "architecture amd64,x86")
+	f.String("arch", "", "architecture x64,x86")
 }
 
 func ParseBinaryFlags(cmd *cobra.Command) (string, []string, bool, uint32) {
@@ -42,7 +43,7 @@ func ParseSacrificeFlags(cmd *cobra.Command) (*implantpb.SacrificeProcess, error
 	isBlockDll, _ := cmd.Flags().GetBool("block_dll")
 	hidden, _ := cmd.Flags().GetBool("hidden")
 	disableEtw, _ := cmd.Flags().GetBool("etw")
-	return builtin.NewSacrificeProcessMessage(int64(ppid), hidden, isBlockDll, disableEtw, argue)
+	return NewSacrifice(int64(ppid), hidden, isBlockDll, disableEtw, argue), nil
 }
 
 func CLRFlagSet(f *pflag.FlagSet) {
@@ -57,23 +58,146 @@ func ParseCLRFlags(cmd *cobra.Command) (bool, bool) {
 }
 
 func TlsCertFlagSet(f *pflag.FlagSet) {
-	f.String("cert_path", "", "tls cert path")
-	f.String("key_path", "", "tls key path")
+	f.String("cert", "", "tls cert path")
+	f.String("key", "", "tls key path")
 	f.BoolP("tls", "t", false, "enable tls")
 }
 
+func EncryptionFlagSet(f *pflag.FlagSet) {
+	f.String("encryption-type", "", "encryption type")
+	f.String("encryption-key", "", "encryption key")
+	f.Bool("encryption-enable", false, "whether to enable encryption ")
+}
+
 func PipelineFlagSet(f *pflag.FlagSet) {
-	f.StringP("name", "n", "", "pipeline name")
-	f.String("host", "", "pipeline host")
+	f.StringP("listener", "l", "", "listener id")
+	f.String("host", "0.0.0.0", "pipeline host")
 	f.UintP("port", "p", 0, "pipeline port")
 }
 
-func ParsePipelineFlags(cmd *cobra.Command) (string, string, uint, string, string, bool) {
-	name, _ := cmd.Flags().GetString("name")
+func ParsePipelineFlags(cmd *cobra.Command) (string, string, uint32) {
+	listenerID, _ := cmd.Flags().GetString("listener")
 	host, _ := cmd.Flags().GetString("host")
-	portUint, _ := cmd.Flags().GetUint("port")
+	portUint, _ := cmd.Flags().GetUint32("port")
+
+	return listenerID, host, portUint
+}
+
+func ParseTLSFlags(cmd *cobra.Command) (*clientpb.TLS, error) {
 	certPath, _ := cmd.Flags().GetString("cert_path")
 	keyPath, _ := cmd.Flags().GetString("key_path")
-	tlsEnable, _ := cmd.Flags().GetBool("tls")
-	return name, host, portUint, certPath, keyPath, tlsEnable
+	var err error
+	var cert, key string
+	if certPath != "" && keyPath != "" {
+		cert, err = cryptography.ProcessPEM(certPath)
+		if err != nil {
+			return nil, err
+		}
+		key, err = cryptography.ProcessPEM(keyPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &clientpb.TLS{
+		Enable: true,
+		Cert:   cert,
+		Key:    key,
+	}, nil
+}
+
+func ParseEncryptionFlags(cmd *cobra.Command) *clientpb.Encryption {
+	encryptionType, _ := cmd.Flags().GetString("encryption-type")
+	encryptionKey, _ := cmd.Flags().GetString("encryption-key")
+	enable, _ := cmd.Flags().GetBool("encryption-enable")
+	return &clientpb.Encryption{
+		Enable: enable,
+		Type:   encryptionType,
+		Key:    encryptionKey,
+	}
+}
+
+func GenerateFlagSet(f *pflag.FlagSet) {
+	f.String("profile", "", "profile name")
+	f.StringP("address", "a", "", "implant address")
+	f.String("target", "", "build target")
+	f.String("ca", "", "custom ca file")
+	f.Int("interval", -1, "interval /second")
+	f.Float64("jitter", -1, "jitter")
+	f.StringSliceP("modules", "m", []string{}, "Set modules e.g.: execute_exe,execute_dll")
+	f.String("srdi", "", "enable srdi")
+}
+
+func ParseGenerateFlags(cmd *cobra.Command) (string, string, string, []string, string, int, float64, bool) {
+	name, _ := cmd.Flags().GetString("profile")
+	address, _ := cmd.Flags().GetString("address")
+	buildTarget, _ := cmd.Flags().GetString("target")
+	//buildType, _ := cmd.Flags().GetString("type")
+	modules, _ := cmd.Flags().GetStringSlice("modules")
+	ca, _ := cmd.Flags().GetString("ca")
+	interval, _ := cmd.Flags().GetInt("interval")
+	jitter, _ := cmd.Flags().GetFloat64("jitter")
+	enableSRDI, _ := cmd.Flags().GetBool("srdi")
+	return name, address, buildTarget, modules, ca, interval, jitter, enableSRDI
+}
+
+func ProfileSet(f *pflag.FlagSet) {
+	f.String("name", "", "Set profile name")
+	f.String("target", "", "Set build target")
+	f.String("pipeline", "", "Set profile pipeline_id")
+	//f.String("type", "", "Set build type")
+	f.String("proxy", "", "Set proxy")
+	//f.String("obfuscate", "", "Set obfuscate")
+	f.StringSlice("modules", []string{}, "Set modules e.g.: execute_exe,execute_dll")
+	f.String("ca", "", "Set ca")
+
+	f.Int("interval", 5, "Set interval")
+	f.Float32("jitter", 0.2, "Set jitter")
+}
+
+func ParseProfileFlags(cmd *cobra.Command) (string, string, string, string, string, string, []string, string, int, float64) {
+	profileName, _ := cmd.Flags().GetString("name")
+	buildTarget, _ := cmd.Flags().GetString("target")
+	pipelineId, _ := cmd.Flags().GetString("pipeline")
+	buildType, _ := cmd.Flags().GetString("type")
+	proxy, _ := cmd.Flags().GetString("proxy")
+	obfuscate, _ := cmd.Flags().GetString("obfuscate")
+	modules, _ := cmd.Flags().GetStringSlice("modules")
+	ca, _ := cmd.Flags().GetString("ca")
+
+	interval, _ := cmd.Flags().GetInt("interval")
+	jitter, _ := cmd.Flags().GetFloat64("jitter")
+
+	return profileName, buildTarget, pipelineId, buildType, proxy, obfuscate, modules, ca, interval, jitter
+}
+
+func MalHttpFlagset(f *pflag.FlagSet) {
+	f.Bool("ignore-cache", false, "ignore cache")
+	f.String("proxy", "", "proxy")
+	f.String("timeout", "", "timeout")
+	f.Bool("insecure", false, "insecure")
+}
+
+func SRDIFlagSet(f *pflag.FlagSet) {
+	f.String("path", "", "file path")
+	//f.String("type", "", "mutant type")
+	f.String("arch", "", "shellcode architecture, eg: x86,x64")
+	f.String("platform", "win", "shellcode platform, eg: windows,linux")
+	f.Uint32("id", 0, "build file id")
+	f.String("function_name", "", "shellcode function name")
+	f.String("user_data_path", "", "user data path")
+}
+
+func ParseSRDIFlags(cmd *cobra.Command) (string, string, string, uint32, map[string]string) {
+	path, _ := cmd.Flags().GetString("path")
+	//typ, _ := cmd.Flags().GetString("type")
+	arch, _ := cmd.Flags().GetString("arch")
+	platform, _ := cmd.Flags().GetString("platform")
+	id, _ := cmd.Flags().GetUint32("id")
+	functionName, _ := cmd.Flags().GetString("function_name")
+	userDataPath, _ := cmd.Flags().GetString("userdata_path")
+	params := map[string]string{
+		"function_name": functionName,
+		"userdata_path": userDataPath,
+	}
+	return path, arch, platform, id, params
 }

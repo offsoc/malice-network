@@ -6,8 +6,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultTimeout = 60
-
 // Bind is a convenience function to bind flags to a given command.
 // name - The name of the flag set (can be empty).
 // cmd  - The command to which the flags should be bound.
@@ -38,16 +36,28 @@ func makeBind(cmd *cobra.Command, con *repl.Console) bindFunc {
 		// Bind the command to the root
 		for _, command := range cmds {
 			for _, c := range command(con) {
-				c.GroupID = group
-				c.SetHelpFunc(help.HelpFunc)
-				c.SetUsageFunc(help.UsageFunc)
 				if c.Annotations == nil {
-					c.Annotations = map[string]string{"menu": cmd.Name()}
-				} else {
-					c.Annotations["menu"] = cmd.Name()
+					c.Annotations = map[string]string{}
 				}
+				c.Annotations["menu"] = cmd.Name()
+				c.GroupID = group
+				updateCommand(con, c, group)
 				cmd.AddCommand(c)
 			}
 		}
+	}
+}
+
+func updateCommand(con *repl.Console, c *cobra.Command, group string) {
+	c.SetHelpFunc(help.HelpFunc)
+	c.SetUsageFunc(help.UsageFunc)
+	if c.Annotations == nil {
+		c.Annotations = map[string]string{}
+	}
+	help.RenderOpsec(c.Annotations["opsec"], c.Use)
+	con.CMDs[c.Name()] = c
+
+	for _, subCmd := range c.Commands() {
+		updateCommand(con, subCmd, group)
 	}
 }

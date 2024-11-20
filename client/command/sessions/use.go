@@ -7,25 +7,25 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func UseSessionCmd(cmd *cobra.Command, con *repl.Console) {
+func UseSessionCmd(cmd *cobra.Command, con *repl.Console) error {
 	var session *core.Session
-	if session = con.GetSession(cmd.Flags().Arg(0)); session == nil {
-		con.Log.Errorf(repl.ErrNotFoundSession.Error())
-		return
-	}
-	session, err := con.UpdateSession(session.SessionId)
-	if err != nil {
-		con.Log.Errorf(err.Error())
+	sid := cmd.Flags().Arg(0)
+	var err error
+	if session = con.GetSession(sid); session == nil {
+		session, err = con.UpdateSession(sid)
+		if err != nil {
+			return err
+		}
 	}
 
-	Use(con, session)
+	return Use(con, session)
 }
 
-func Use(con *repl.Console, sess *core.Session) {
-	err := addon.RefreshAddonCommand(sess.Addons.Addons, con)
+func Use(con *repl.Console, sess *core.Session) error {
+	err := addon.RefreshAddonCommand(sess.Addons, con)
 	if err != nil {
-		core.Log.Errorf(err.Error())
-		return
+		return err
 	}
 	con.SwitchImplant(sess)
+	return nil
 }

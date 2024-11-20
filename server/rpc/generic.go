@@ -5,11 +5,11 @@ import (
 	"errors"
 	"github.com/chainreactors/logs"
 	"github.com/chainreactors/malice-network/helper/consts"
+	"github.com/chainreactors/malice-network/helper/errs"
+	"github.com/chainreactors/malice-network/helper/proto/client/clientpb"
+	"github.com/chainreactors/malice-network/helper/proto/implant/implantpb"
 	"github.com/chainreactors/malice-network/helper/types"
 	"github.com/chainreactors/malice-network/helper/utils/handler"
-	"github.com/chainreactors/malice-network/proto/client/clientpb"
-	"github.com/chainreactors/malice-network/proto/implant/implantpb"
-	"github.com/chainreactors/malice-network/proto/listener/lispb"
 	"github.com/chainreactors/malice-network/server/internal/core"
 	"github.com/chainreactors/malice-network/server/internal/db"
 	"google.golang.org/grpc/credentials"
@@ -22,6 +22,7 @@ import (
 func newGenericRequest(ctx context.Context, msg proto.Message, opts ...int) (*GenericRequest, error) {
 	req := &GenericRequest{
 		Message: msg,
+		Callee:  getCallee(ctx),
 	}
 	if session, err := getSession(ctx); err == nil {
 		req.Session = session
@@ -42,9 +43,10 @@ type GenericRequest struct {
 	Task    *core.Task
 	Count   int
 	Session *core.Session
+	Callee  string
 }
 
-func (r *GenericRequest) InitSpite() (*implantpb.Spite, error) {
+func (r *GenericRequest) InitSpite(ctx context.Context) (*implantpb.Spite, error) {
 	spite := &implantpb.Spite{
 		Timeout: uint64(consts.MinTimeout.Seconds()),
 		Async:   true,
@@ -55,10 +57,11 @@ func (r *GenericRequest) InitSpite() (*implantpb.Spite, error) {
 		return nil, err
 	}
 	r.Task = r.Session.NewTask(spite.Name, r.Count)
-
+	r.Task.Callee = r.Callee
 	spite.TaskId = r.Task.Id
-	r.Message = nil
-	err = db.AddTask(r.Task)
+	clientName := getClientName(ctx)
+	r.Task.CallBy = clientName
+	err = db.AddTask(r.Task.ToProtobuf())
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +88,7 @@ func (r *GenericRequest) SetCallback(callback func()) {
 func (r *GenericRequest) HandlerResponse(ch chan *implantpb.Spite, typ types.MsgName, callbacks ...func(spite *implantpb.Spite)) {
 	resp := <-ch
 	r.Session.AddMessage(resp, r.Task.Cur)
-	err := handler.AssertStatusAndResponse(resp, typ)
+	err := handler.AssertStatusAndSpite(resp, typ)
 	if err != nil {
 		logs.Log.Debug(err)
 		r.Task.Panic(buildErrorEvent(r.Task, err))
@@ -98,8 +101,19 @@ func (r *GenericRequest) HandlerResponse(ch chan *implantpb.Spite, typ types.Msg
 			}
 		})
 	}
-	r.Task.Done(resp)
-	r.Task.Finish("")
+	r.Task.Done(resp, "")
+	r.Task.Finish(resp, "")
+	err = db.UpdateTask(r.Task.ToProtobuf())
+	if err != nil {
+		logs.Log.Errorf("update task cur failed %s", err)
+		return
+	}
+	err = r.Session.TaskLog(r.Task, resp)
+	if err != nil {
+		logs.Log.Errorf("Failed to log task: %v", err)
+	}
+	return
+
 }
 
 func buildErrorEvent(task *core.Task, err error) core.Event {
@@ -112,8 +126,8 @@ func buildErrorEvent(task *core.Task, err error) core.Event {
 		eventErr = handler.ErrAssertFailure.Error()
 	case errors.Is(err, handler.ErrNilResponseBody):
 		eventErr = handler.ErrNilResponseBody.Error()
-	case errors.Is(err, ErrMissingRequestField):
-		eventErr = ErrMissingRequestField.Error()
+	case errors.Is(err, errs.ErrMissingRequestField):
+		eventErr = errs.ErrMissingRequestField.Error()
 	default:
 		eventErr = err.Error()
 	}
@@ -127,16 +141,16 @@ func buildErrorEvent(task *core.Task, err error) core.Event {
 }
 
 func (rpc *Server) GenericHandler(ctx context.Context, req *GenericRequest) (chan *implantpb.Spite, error) {
-	spite, err := req.InitSpite()
+	spite, err := req.InitSpite(ctx)
 	if err != nil {
 		logs.Log.Errorf(err.Error())
 		return nil, err
 	}
 	if pipelinesCh[req.Session.PipelineID] == nil {
-		return nil, ErrNotFoundPipeline
+		return nil, errs.ErrNotFoundPipeline
 	}
 	out, err := req.Session.RequestWithAsync(
-		&lispb.SpiteSession{SessionId: req.Session.ID, TaskId: req.Task.Id, Spite: spite},
+		&clientpb.SpiteRequest{Session: req.Session.ToProtobufLite(), Task: req.Task.ToProtobuf(), Spite: spite},
 		pipelinesCh[req.Session.PipelineID],
 		consts.MinTimeout)
 	if err != nil {
@@ -148,16 +162,16 @@ func (rpc *Server) GenericHandler(ctx context.Context, req *GenericRequest) (cha
 
 // StreamGenericHandler - Generic handler for async request/response's for beacon tasks
 func (rpc *Server) StreamGenericHandler(ctx context.Context, req *GenericRequest) (chan *implantpb.Spite, chan *implantpb.Spite, error) {
-	spite, err := req.InitSpite()
+	spite, err := req.InitSpite(ctx)
 	if err != nil {
 		logs.Log.Errorf(err.Error())
 		return nil, nil, err
 	}
 	if pipelinesCh[req.Session.PipelineID] == nil {
-		return nil, nil, ErrNotFoundPipeline
+		return nil, nil, errs.ErrNotFoundPipeline
 	}
 	in, out, err := req.Session.RequestWithStream(
-		&lispb.SpiteSession{SessionId: req.Session.ID, TaskId: req.Task.Id, Spite: spite},
+		&clientpb.SpiteRequest{Session: req.Session.ToProtobufLite(), Task: req.Task.ToProtobuf(), Spite: spite},
 		pipelinesCh[req.Session.PipelineID],
 		consts.MinTimeout)
 	if err != nil {
@@ -180,12 +194,24 @@ func (rpc *Server) GetBasic(ctx context.Context, _ *clientpb.Empty) (*clientpb.B
 func getSessionID(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", ErrNotFoundSession
+		return "", errs.ErrNotFoundSession
 	}
 	if sid := md.Get("session_id"); len(sid) > 0 {
 		return sid[0], nil
 	} else {
-		return "", ErrNotFoundSession
+		return "", errs.ErrNotFoundSession
+	}
+}
+
+func getCallee(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return consts.CalleeCMD
+	}
+	if callee := md.Get("callee"); len(callee) > 0 {
+		return callee[0]
+	} else {
+		return consts.CalleeCMD
 	}
 }
 
@@ -197,7 +223,7 @@ func getSession(ctx context.Context) (*core.Session, error) {
 
 	session, ok := core.Sessions.Get(sid)
 	if !ok {
-		return nil, ErrInvalidSessionID
+		return nil, errs.ErrInvalidSessionID
 	}
 	return session, nil
 }
@@ -205,12 +231,12 @@ func getSession(ctx context.Context) (*core.Session, error) {
 func getListenerID(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", ErrNotFoundListener
+		return "", errs.ErrNotFoundListener
 	}
 	if sid := md.Get("listener_id"); len(sid) > 0 {
 		return sid[0], nil
 	} else {
-		return "", ErrNotFoundListener
+		return "", errs.ErrNotFoundListener
 	}
 }
 
@@ -233,12 +259,12 @@ func getRemoteAddr(ctx context.Context) string {
 func getPipelineID(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", ErrNotFoundPipeline
+		return "", errs.ErrNotFoundPipeline
 	}
 	if sid := md.Get("pipeline_id"); len(sid) > 0 {
 		return sid[0], nil
 	} else {
-		return "", ErrNotFoundPipeline
+		return "", errs.ErrNotFoundPipeline
 	}
 }
 
